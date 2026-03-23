@@ -1,0 +1,96 @@
+﻿# .NET and Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.sln.docstates
+.editorconfig
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+.nuget/packages/
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sln.iml
+.editorconfig
+
+# Application logs
+logs/
+*.log
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+appsettings.*.local.json
+appsettings.*.Development.json
+
+# Database
+*.mdf
+*.ldf
+*.ndf
+sql_data/
+
+# Docker volumes and overrides
+docker-compose.override.yml
+docker_data/
+redis_data/
+rabbitmq_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+
+# Build artifacts
+artifacts/
+dist/
+publish/
+
+# Node modules (if any frontend)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Code coverage
+coverage/
+.coverage
+*.coverage
+
+# Test results
+TestResults/
+.trx
+
+# Rider IDE
+.idea/
+*.sln.iml
+
+# User specific files
+*.VisualStudio.DotSettings.user
