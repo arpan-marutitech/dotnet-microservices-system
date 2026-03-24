@@ -1,8 +1,108 @@
-version: '3.8'
-
 services:
 
-  # 🗄️ SQL SERVER
+  # � ELASTICSEARCH
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.authc.api_key.enabled=true
+      - ELASTIC_PASSWORD=elastic123
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - microservices-network
+
+  # 📊 KIBANA
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: kibana_system123
+    depends_on:
+      elastic-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - microservices-network
+
+  # 🔧 ELASTIC INIT (SET KIBANA SYSTEM PASSWORD)
+  elastic-init:
+    image: curlimages/curl:8.6.0
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "Waiting for Elasticsearch security API..."
+        until curl -s -u elastic:elastic123 http://elasticsearch:9200/_security/_authenticate >/dev/null; do
+          sleep 2
+        done
+        echo "Setting kibana_system password..."
+        curl -s -X POST -u elastic:elastic123 \
+          -H "Content-Type: application/json" \
+          http://elasticsearch:9200/_security/user/kibana_system/_password \
+          -d '{"password":"kibana_system123"}'
+        echo "elastic-init completed"
+    restart: "no"
+    networks:
+      - microservices-network
+
+  # 📈 KIBANA INIT
+  kibana-init:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    depends_on:
+      kibana:
+        condition: service_healthy
+    volumes:
+      - ./elk-config/kibana-index-pattern.sh:/docker-entrypoint-initdb.d/init.sh
+    entrypoint: ["bash", "-c", "bash /docker-entrypoint-initdb.d/init.sh"]
+    networks:
+      - microservices-network
+
+  # 📋 LOGSTASH
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: logstash
+    ports:
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "9600:9600"
+    environment:
+      - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
+      - "ELASTICSEARCH_USERNAME=elastic"
+      - "ELASTICSEARCH_PASSWORD=elastic123"
+      - "LS_JAVA_OPTS=-Xmx256m -Xms256m"
+    volumes:
+      - ./elk-config/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ./elk-config/logstash-patterns:/usr/share/logstash/patterns:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - microservices-network
+
+  # �🗄️ SQL SERVER
   sqldb:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: sqlserver
@@ -66,8 +166,11 @@ services:
     depends_on:
       sqldb:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - microservices-network
+    restart: on-failure
 
   # 👤 USER SERVICE
   userservice:
@@ -84,8 +187,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - microservices-network
+    restart: on-failure
 
   # 📦 ORDER SERVICE
   orderservice:
@@ -104,8 +210,11 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - microservices-network
+    restart: on-failure
 
   # 📢 NOTIFICATION SERVICE
   notificationservice:
@@ -120,8 +229,11 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - microservices-network
+    restart: on-failure
 
   # 🚪 API GATEWAY
   apigateway:
@@ -130,19 +242,27 @@ services:
       dockerfile: Dockerfile
     container_name: apigateway
     ports:
-      - "5000:8080"
+      - "5005:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
     depends_on:
-      - authservice
-      - userservice
-      - orderservice
-      - notificationservice
+      authservice:
+        condition: service_started
+      userservice:
+        condition: service_started
+      orderservice:
+        condition: service_started
+      notificationservice:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
     networks:
       - microservices-network
+    restart: on-failure
 
 volumes:
   sqlserver_data:
+  elasticsearch_data:
 
 networks:
   microservices-network:

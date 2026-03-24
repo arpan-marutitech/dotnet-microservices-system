@@ -1,0 +1,40 @@
+# ============================================================================
+# LOGSTASH PATTERNS FOR .NET MICROSERVICES
+# ============================================================================
+# Custom grok patterns for parsing .NET-specific log formats
+# ============================================================================
+
+# ASP.NET Core Request/Response Pattern
+ASPNETCORE_REQUEST_ID %{NOTSPACE:request_id}
+ASPNETCORE_CORRELATION_ID %{UUID:correlation_id}|%{NOTSPACE:correlation_id}
+
+# Microservice Common Patterns
+SERVICE_NAME userservice|orderservice|authservice|notificationservice|apigateway
+LOG_LEVEL TRACE|DEBUG|INFORMATION|WARNING|ERROR|CRITICAL|FATAL|VERBOSE
+
+# UTC Timestamp Pattern
+UTC_TIMESTAMP %{YEAR}-%{MONTHNUM}-%{MONTHDAY}T%{HOUR}:%{MINUTE}:%{SECOND}(?:\.%{INT})?Z
+
+# Entity Framework Pattern (EF Core)
+EF_SQL_QUERY (?<sql_query>SELECT|INSERT|UPDATE|DELETE|EXEC).{0,500}
+
+# Exception Pattern
+DOTNET_EXCEPTION (?:%{WORD:exception_type}|%{NOTSPACE:exception_type})(?:\s*:\s*%{GREEDYDATA:exception_message})?
+
+# HTTP Status Code
+HTTP_STATUS %{INT:status_code:int}
+
+# Benchmark/Duration Pattern (milliseconds)
+DURATION_MS %{INT:duration_ms:int}\s*ms
+
+# Model Validation Error
+VALIDATION_ERROR (?:validation\s+(?:error|failed)|invalid\s+%{WORD:field_name})
+
+# Database Connection Pattern
+DB_CONNECTION_STRING (?:Server|Data Source)=(?<db_server>[^;]+);.*Database=(?<database>[^;]+)
+
+# Request Path Pattern
+REQUEST_PATH (?<http_method>GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(?<request_path>/\S*)?
+
+# JSON Parsing Pattern (for nested JSON in logs)
+JSON_OBJECT \{(?:[^{}]|(?:\{[^{}]*\}))*\}

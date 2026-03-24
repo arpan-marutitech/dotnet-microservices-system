@@ -13,15 +13,59 @@ using OrderService.API.Middleware;
 using StackExchange.Redis;
 using OrderService.Application.Common;
 using AutoMapper;
+using System.Net;
+using System.Net.Sockets;
 using Serilog;
+using Serilog.Events;
+using Serilog.Sinks.Udp;
+using Serilog.Sinks.Elasticsearch;
 using OrderServiceImpl = OrderService.Application.Services.OrderService;
 
-// -------------------- SERILOG CONFIGURATION --------------------
-Log.Logger = new LoggerConfiguration()
-    .WriteTo.Console()
-    .WriteTo.File("logs/orderservice-log.txt", rollingInterval: Serilog.RollingInterval.Day)
+// -------------------- SERILOG CONFIGURATION WITH ELASTICSEARCH --------------------
+var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
+var logstashIp = Dns.GetHostAddresses("logstash")
+    .First(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+    .ToString();
+
+var loggerConfig = new LoggerConfiguration()
     .MinimumLevel.Information()
-    .CreateLogger();
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Information)
+    .Enrich.FromLogContext()
+    .Enrich.WithProperty("Service", "OrderService")
+    .Enrich.WithProperty("Environment", environment)
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}")
+        .WriteTo.Udp(
+            logstashIp,
+            5000,
+            outputTemplate: "lvl={Level:u3}|svc={Service}|env={Environment}|msg={Message:lj}|props={Properties:j}|ex={Exception}")
+    .WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri("http://elasticsearch:9200"))
+    {
+        AutoRegisterTemplate = true,
+        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv8,
+        IndexFormat = "logs-orderservice-{0:yyyy.MM.dd}",
+        BufferBaseFilename = null,
+        BufferFileSizeLimitBytes = 52428800,
+        BufferLogShippingInterval = TimeSpan.FromSeconds(30),
+        ModifyConnectionSettings = cfg =>
+        {
+            cfg.BasicAuthentication("elastic", "elastic123");
+            cfg.DisablePing();
+            return cfg;
+        }
+    });
+
+// Add file logging only in Development
+if (environment == "Development")
+{
+    loggerConfig = loggerConfig.WriteTo.File(
+        "logs/orderservice-{Date}.txt",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 7,
+        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz}] {Level:u3} {Message:lj} {Properties:j}{NewLine}{Exception}");
+}
+
+Log.Logger = loggerConfig.CreateLogger();
 
 try
 {
@@ -54,7 +98,7 @@ try
     builder.Services.AddHealthChecks();
 
     // -------------------- DEPENDENCY INJECTION --------------------
-    var userServiceBaseUrl = builder.Configuration["UserService:BaseUrl"] ?? "https://localhost:5244";
+    var userServiceBaseUrl = builder.Configuration["UserService:BaseUrl"] ?? "http://userservice:8080";
 
     builder.Services.AddHttpClient<IUserServiceClient, UserServiceClient>(client =>
     {
