@@ -1,31 +1,31 @@
-# 🚀 .NET Microservices System (Production-Ready)
+# 🚀 .NET Microservices System
 
-A **production-grade microservices architecture** built using **ASP.NET Core**, implementing modern backend patterns like **API Gateway, Event-Driven Architecture, Caching, and Containerization**.
+A production-oriented microservices architecture built with **ASP.NET Core (.NET 8)**, implementing API Gateway, event-driven communication, distributed caching, centralized logging, and containerized deployment.
 
 ---
 
 ## 🧠 Overview
 
-This project demonstrates how to design and build a **scalable, distributed backend system** using industry-standard tools and practices.
+This project demonstrates a scalable backend system composed of multiple independent services communicating through well-defined patterns.
 
 It includes:
 
-* 🔐 Authentication & Authorization (JWT)
-* 🧱 Microservices Architecture
-* 🚪 API Gateway (Ocelot)
-* 📬 Event-driven communication (RabbitMQ)
-* ⚡ Distributed caching (Redis)
-* 🐳 Dockerized deployment
-* 📊 Logging, Health Checks & Exception Handling
+* Authentication and authorization using JWT
+* API Gateway for centralized routing
+* Event-driven communication using RabbitMQ
+* Distributed caching using Redis
+* Centralized logging using ELK Stack
+* Health checks and structured exception handling
+* Docker-based deployment for all services
 
 ---
 
 ## 🏗️ Architecture
 
-```
+```id="arch1"
 Client
    ↓
-API Gateway (Ocelot)
+API Gateway (Ocelot - 5005)
    ↓
 -------------------------------------
 |   Auth Service   |   User Service  |
@@ -38,72 +38,101 @@ API Gateway (Ocelot)
 -------------------------------------
             ↓
         SQL Server (DB)
+            ↓
+-------------------------------------
+| Logstash → Elasticsearch → Kibana |
+-------------------------------------
 ```
 
 ---
 
-## 🔥 Features
+## 🔧 Features
 
-* ✅ Clean Architecture (Controller → Service → Repository)
-* ✅ Microservices-based system design
-* ✅ API Gateway with centralized routing
-* ✅ JWT-based authentication
-* ✅ Event-driven architecture using RabbitMQ
-* ✅ Redis caching (Cache-Aside Pattern)
-* ✅ Global exception handling
-* ✅ Structured logging using Serilog
-* ✅ Health checks for monitoring
-* ✅ Swagger API documentation
-* ✅ Dockerized multi-service deployment
+* Clean layered architecture (Controller → Service → Repository)
+* Independent microservices with clear responsibilities
+* Centralized routing via API Gateway (Ocelot)
+* JWT-based authentication and authorization
+* Event-driven messaging with RabbitMQ
+* Redis cache using Cache-Aside pattern
+* Global exception handling middleware
+* Structured logging using Serilog
+* Centralized logging pipeline (ELK Stack)
+* Health checks for service availability
+* Swagger for API documentation
+* Fully containerized setup using Docker
 
 ---
 
-## 🧱 Microservices
+## 🧱 Services
 
-| Service                 | Description                             | Port |
-| ----------------------- | --------------------------------------- | ---- |
-| 🔐 Auth Service         | Handles authentication (Login/Register) | 5001 |
-| 👤 User Service         | Manages user data                       | 5002 |
-| 📦 Order Service        | Handles order operations                | 5003 |
-| 📩 Notification Service | Consumes events (RabbitMQ)              | 5004 |
-| 🚪 API Gateway          | Single entry point (Ocelot)             | 5000 |
+| Service              | Description                     | Port |
+| -------------------- | ------------------------------- | ---- |
+| Auth Service         | Authentication & token handling | 5001 |
+| User Service         | User management                 | 5002 |
+| Order Service        | Order processing                | 5003 |
+| Notification Service | Event consumer                  | 5004 |
+| API Gateway (Ocelot) | Entry point for all requests    | 5005 |
 
 ---
 
 ## ⚙️ Tech Stack
 
-* **Backend:** ASP.NET Core (.NET 8)
-* **Database:** SQL Server
-* **Cache:** Redis
-* **Messaging:** RabbitMQ
-* **API Gateway:** Ocelot
-* **Containerization:** Docker & Docker Compose
-* **Logging:** Serilog
+* ASP.NET Core (.NET 8)
+* SQL Server
+* Redis
+* RabbitMQ
+* Ocelot API Gateway
+* Serilog
+* Elasticsearch, Logstash, Kibana (ELK)
+* Docker & Docker Compose
 
 ---
 
-## 🐳 Run the Project (Docker)
+## 📊 Centralized Logging (ELK)
 
-> 🚀 Start entire system with one command
+Logging is implemented using a centralized pipeline:
 
-```bash
+```id="elkflow"
+.NET Services → Serilog → Logstash → Elasticsearch → Kibana
+```
+
+Capabilities:
+
+* Centralized log storage
+* Real-time log exploration
+* Filtering by service, request, or log level
+* Visualization using dashboards
+
+Access:
+
+* Kibana: http://localhost:5601
+* Elasticsearch: http://localhost:9200
+
+---
+
+## 🐳 Running the System
+
+Start all services:
+
+```bash id="run1"
 docker-compose up --build
 ```
 
 ---
 
-## 🌐 Access Services
+## 🌐 Service Endpoints
 
-| Component               | URL                    |
-| ----------------------- | ---------------------- |
-| 🚪 API Gateway          | http://localhost:5000  |
-| 🔐 Auth Service         | http://localhost:5001  |
-| 👤 User Service         | http://localhost:5002  |
-| 📦 Order Service        | http://localhost:5003  |
-| 📩 Notification Service | http://localhost:5004  |
-| 🐇 RabbitMQ UI          | http://localhost:15672 |
-| 🗄️ SQL Server          | localhost:1433         |
-| ⚡ Redis                 | localhost:6379         |
+| Component            | URL                    |
+| -------------------- | ---------------------- |
+| API Gateway          | http://localhost:5005  |
+| Auth Service         | http://localhost:5001  |
+| User Service         | http://localhost:5002  |
+| Order Service        | http://localhost:5003  |
+| Notification Service | http://localhost:5004  |
+| RabbitMQ UI          | http://localhost:15672 |
+| Kibana               | http://localhost:5601  |
+| Redis                | localhost:6379         |
+| SQL Server           | localhost:1433         |
 
 ---
 
@@ -116,90 +145,58 @@ docker-compose up --build
 
 ---
 
-## 📊 Key Concepts Implemented
+## 🔄 Request Flow
 
-* 🧩 Microservices Architecture
-* 🔄 API Gateway Pattern
-* 📬 Event-Driven Communication
-* ⚡ Caching (Redis - Cache Aside Pattern)
-* 🐳 Containerization (Docker)
-* 🔐 Authentication (JWT)
-* 🧠 Distributed System Design
-
----
-
-## 🔄 Request Flow Example
-
-```
-Client → API Gateway → Order Service
+```id="flow1"
+Client → API Gateway → Service
             ↓
-        Save to DB
+        Database Operation
             ↓
      Publish Event (RabbitMQ)
             ↓
  Notification Service consumes event
-            ↓
-     Send Email / Log
 ```
 
 ---
 
-## 🧪 Testing the System
+## 🧪 Basic Testing
 
-1. Register a user → `/auth/register`
-2. Login → `/auth/login`
-3. Use JWT token
-4. Create order → `/order`
-5. Check Redis caching (2nd call faster ⚡)
-6. Verify RabbitMQ event in Notification Service logs
-
----
-
-## 📸 Screenshots (Optional)
-
-> Add screenshots here for better presentation
-
-```
-docs/images/swagger.png
-docs/images/rabbitmq.png
-docs/images/docker.png
-```
+* Register and login via Auth Service
+* Use JWT token for authorized endpoints
+* Create and fetch data through API Gateway
+* Observe caching behavior in Redis
+* Verify events via Notification Service
+* Explore logs in Kibana
 
 ---
 
-## 🧠 What I Learned
+## 📊 Observability
 
-* Designing scalable backend systems
-* Implementing microservices communication
-* Using message brokers (RabbitMQ)
-* Applying caching strategies (Redis)
-* Containerizing applications with Docker
-* Production-ready API design
+* Structured logs using Serilog
+* Centralized log ingestion via Logstash
+* Indexed storage in Elasticsearch
+* Visualization and querying via Kibana
 
 ---
 
-## 🚀 Future Enhancements
+## 🔮 Enhancements
 
-* Kubernetes deployment
-* CI/CD pipeline (GitHub Actions)
-* Centralized logging (ELK Stack)
-* Monitoring (Prometheus + Grafana)
-* Rate limiting & security improvements
+* Kubernetes-based deployment
+* CI/CD pipeline integration
+* Metrics and monitoring (Prometheus, Grafana)
+* Alerting based on log patterns
+* Performance metrics (response time tracking)
 
 ---
 
 ## 👨‍💻 Author
 
-**Arpan Rupareliya**
+Arpan Rupareliya
 
 ---
 
-## ⭐ If you like this project
+## 📌 Note
 
-Give it a ⭐ on GitHub and feel free to fork or contribute!
+This project demonstrates a modular backend system with emphasis on scalability, maintainability, and observability using modern tooling and patterns.
 
 ---
-
-## 💥 Final Note
-
-> This project represents a **real-world backend system design** using modern technologies and best practices, suitable for production-level applications.
