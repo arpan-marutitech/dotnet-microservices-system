@@ -1,11 +1,20 @@
+using MassTransit;
 using NotificationService.Services;
 using NotificationService.Middleware;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using System.Net;
 using System.Net.Sockets;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.Udp;
 using Serilog.Sinks.Elasticsearch;
+
+const string ServiceName = "NotificationService";
 
 // -------------------- SERILOG CONFIGURATION WITH ELASTICSEARCH --------------------
 var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
@@ -17,7 +26,7 @@ var loggerConfig = new LoggerConfiguration()
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .Enrich.FromLogContext()
-    .Enrich.WithProperty("Service", "NotificationService")
+    .Enrich.WithProperty("Service", ServiceName)
     .Enrich.WithProperty("Environment", environment)
     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}")
         .WriteTo.Udp(
@@ -57,6 +66,7 @@ try
     var builder = WebApplication.CreateBuilder(args);
 
     builder.Host.UseSerilog();
+    ConfigureTelemetry(builder, ServiceName);
 
     // Add services to the container.
     // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -66,8 +76,25 @@ try
     // -------------------- HEALTH CHECKS --------------------
     builder.Services.AddHealthChecks();
 
-    // Run RabbitMQ consumer in the background for order-created events
-    builder.Services.AddHostedService<RabbitMqConsumer>();
+    builder.Services.AddMassTransit(configurator =>
+    {
+        configurator.SetKebabCaseEndpointNameFormatter();
+        configurator.AddConsumer<OrderCreatedConsumer>();
+
+        configurator.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host("rabbitmq", "/", host =>
+            {
+                host.Username("guest");
+                host.Password("guest");
+            });
+
+            cfg.ReceiveEndpoint("order-created", endpoint =>
+            {
+                endpoint.ConfigureConsumer<OrderCreatedConsumer>(context);
+            });
+        });
+    });
 
     var app = builder.Build();
 
@@ -111,6 +138,110 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+static void ConfigureTelemetry(WebApplicationBuilder builder, string serviceName)
+{
+    var otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? "http://signoz-otel-collector:4317";
+    var serviceVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+    var processMetrics = new ProcessMetricsCollector(serviceName);
+
+    builder.Services.AddSingleton(processMetrics);
+
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(resource => resource
+            .AddService(serviceName: serviceName, serviceVersion: serviceVersion)
+            .AddAttributes(new[]
+            {
+                new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)
+            }))
+        .WithTracing(tracing => tracing
+            .AddAspNetCoreInstrumentation(options =>
+            {
+                options.RecordException = true;
+                options.Filter = httpContext => !httpContext.Request.Path.StartsWithSegments("/health");
+            })
+            .AddHttpClientInstrumentation(options => options.RecordException = true)
+            .AddSource("MassTransit")
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }))
+        .WithMetrics(metrics => metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddMeter("MassTransit")
+            .AddMeter(processMetrics.MeterName)
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }));
+}
+
+internal sealed class ProcessMetricsCollector : IDisposable
+{
+    private readonly Meter _meter;
+
+    public ProcessMetricsCollector(string serviceName)
+    {
+        MeterName = $"{serviceName}.Process";
+        _meter = new Meter(MeterName);
+
+        _meter.CreateObservableGauge("process.working_set.bytes", () => ReadLong(process => process.WorkingSet64), unit: "By");
+        _meter.CreateObservableGauge("process.private_memory.bytes", () => ReadLong(process => process.PrivateMemorySize64), unit: "By");
+        _meter.CreateObservableGauge("process.thread.count", () => ReadLong(process => process.Threads.Count));
+        _meter.CreateObservableGauge("process.handle.count", ReadHandleCount);
+        _meter.CreateObservableGauge("process.cpu.time.total", ReadCpuTime, unit: "s");
+    }
+
+    public string MeterName { get; }
+
+    public void Dispose()
+    {
+        _meter.Dispose();
+    }
+
+    private static double ReadCpuTime()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return process.TotalProcessorTime.TotalSeconds;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long ReadHandleCount()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return process.HandleCount;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long ReadLong(Func<Process, long> reader)
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return reader(process);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 }
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)

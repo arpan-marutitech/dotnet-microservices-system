@@ -1,8 +1,9 @@
 ﻿using AutoMapper;
+using Contracts;
+using MassTransit;
 using OrderService.Application.Clients;
 using OrderService.Application.Common;
 using OrderService.Application.DTOs;
-using OrderService.Application.Messaging;
 using OrderService.Application.Services.Interfaces;
 using OrderService.Domain.Entities;
 using OrderService.Domain.Interfaces;
@@ -14,20 +15,20 @@ public class OrderService : IOrderService
     private readonly IOrderRepository _orderRepository;
     private readonly IMapper _mapper;
     private readonly IUserServiceClient _userClient;
-    private readonly RabbitMqPublisher _publisher;
+    private readonly IPublishEndpoint _publishEndpoint;
     private readonly RedisService _redis;
 
     public OrderService(
         IOrderRepository orderRepository,
         IMapper mapper,
         IUserServiceClient userClient,
-        RabbitMqPublisher publisher,
+        IPublishEndpoint publishEndpoint,
         RedisService redis)
     {
         _orderRepository = orderRepository;
         _mapper = mapper;
         _userClient = userClient;
-        _publisher = publisher;
+        _publishEndpoint = publishEndpoint;
         _redis = redis;
     }
 
@@ -68,7 +69,7 @@ public class OrderService : IOrderService
         var created = _orderRepository.Add(order);
 
         // Publish an event so other services can react (e.g., send notifications)
-        await _publisher.PublishAsync(new OrderCreatedEvent
+        await _publishEndpoint.Publish(new OrderCreatedEvent
         {
             OrderId = created.Id,
             UserId = created.UserId,

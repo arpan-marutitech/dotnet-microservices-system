@@ -7,7 +7,7 @@ public interface IUserRepository
     List<User> GetAll();
     User? GetById(int id);
     User? GetByEmail(string email);
-    User Add(User user);
+    User Add(User user, bool preserveIdentity = false);
     void Update(User user);
     void Delete(int id);
 }

@@ -36,12 +36,22 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost]
-    public ActionResult<ApiResponse<UserDto>> Create([FromBody] CreateUserDto dto)
+    public async Task<ActionResult<ApiResponse<UserDto>>> Create([FromBody] CreateUserDto dto)
     {
         if (!ModelState.IsValid)
             return BadRequest(ApiResponse<UserDto>.FailResponse("Invalid input"));
 
-        return Ok(_userService.Create(dto));
+        return Ok(await _userService.Create(dto));
+    }
+
+    [HttpPost("internal/sync")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public async Task<ActionResult<ApiResponse<UserDto>>> SyncAuthUser([FromBody] SyncUserDto dto)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ApiResponse<UserDto>.FailResponse("Invalid input"));
+
+        return Ok(await _userService.SyncAuthUser(dto));
     }
 
     [HttpPut("{id:int}")]

@@ -1,4 +1,4 @@
-namespace NotificationService;
+namespace Contracts;
 
 public class OrderCreatedEvent
 {

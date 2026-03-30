@@ -1,9 +1,13 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using MassTransit;
 using Microsoft.IdentityModel.Tokens;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using System.Text;
 using System.Threading;
 using OrderService.Application.Clients;
-using OrderService.Application.Messaging;
 using OrderService.Application.Services.Interfaces;
 using OrderService.Domain.Interfaces;
 using OrderService.Infrastructure.Repositories;
@@ -15,11 +19,15 @@ using OrderService.Application.Common;
 using AutoMapper;
 using System.Net;
 using System.Net.Sockets;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.Udp;
 using Serilog.Sinks.Elasticsearch;
 using OrderServiceImpl = OrderService.Application.Services.OrderService;
+
+const string ServiceName = "OrderService";
 
 // -------------------- SERILOG CONFIGURATION WITH ELASTICSEARCH --------------------
 var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
@@ -32,7 +40,7 @@ var loggerConfig = new LoggerConfiguration()
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Information)
     .Enrich.FromLogContext()
-    .Enrich.WithProperty("Service", "OrderService")
+    .Enrich.WithProperty("Service", ServiceName)
     .Enrich.WithProperty("Environment", environment)
     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}")
         .WriteTo.Udp(
@@ -72,6 +80,7 @@ try
     var builder = WebApplication.CreateBuilder(args);
 
     builder.Host.UseSerilog();
+    ConfigureTelemetry(builder, ServiceName);
 
     // -------------------- DATABASE --------------------
     builder.Services.AddDbContext<AppDbContext>(options =>
@@ -107,8 +116,21 @@ try
 
     builder.Services.AddScoped<IOrderService, OrderServiceImpl>();
 
-    // RabbitMQ publisher used to emit events (e.g., OrderCreated) for other services to consume.
-    builder.Services.AddSingleton<RabbitMqPublisher>();
+    builder.Services.AddMassTransit(configurator =>
+    {
+        configurator.SetKebabCaseEndpointNameFormatter();
+
+        configurator.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host("rabbitmq", "/", host =>
+            {
+                host.Username("guest");
+                host.Password("guest");
+            });
+
+            cfg.ConfigureEndpoints(context);
+        });
+    });
 
     builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 
@@ -189,4 +211,108 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+static void ConfigureTelemetry(WebApplicationBuilder builder, string serviceName)
+{
+    var otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? "http://signoz-otel-collector:4317";
+    var serviceVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+    var processMetrics = new ProcessMetricsCollector(serviceName);
+
+    builder.Services.AddSingleton(processMetrics);
+
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(resource => resource
+            .AddService(serviceName: serviceName, serviceVersion: serviceVersion)
+            .AddAttributes(new[]
+            {
+                new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)
+            }))
+        .WithTracing(tracing => tracing
+            .AddAspNetCoreInstrumentation(options =>
+            {
+                options.RecordException = true;
+                options.Filter = httpContext => !httpContext.Request.Path.StartsWithSegments("/health");
+            })
+            .AddHttpClientInstrumentation(options => options.RecordException = true)
+            .AddSource("MassTransit")
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }))
+        .WithMetrics(metrics => metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddMeter("MassTransit")
+            .AddMeter(processMetrics.MeterName)
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }));
+}
+
+internal sealed class ProcessMetricsCollector : IDisposable
+{
+    private readonly Meter _meter;
+
+    public ProcessMetricsCollector(string serviceName)
+    {
+        MeterName = $"{serviceName}.Process";
+        _meter = new Meter(MeterName);
+
+        _meter.CreateObservableGauge("process.working_set.bytes", () => ReadLong(process => process.WorkingSet64), unit: "By");
+        _meter.CreateObservableGauge("process.private_memory.bytes", () => ReadLong(process => process.PrivateMemorySize64), unit: "By");
+        _meter.CreateObservableGauge("process.thread.count", () => ReadLong(process => process.Threads.Count));
+        _meter.CreateObservableGauge("process.handle.count", ReadHandleCount);
+        _meter.CreateObservableGauge("process.cpu.time.total", ReadCpuTime, unit: "s");
+    }
+
+    public string MeterName { get; }
+
+    public void Dispose()
+    {
+        _meter.Dispose();
+    }
+
+    private static double ReadCpuTime()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return process.TotalProcessorTime.TotalSeconds;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long ReadHandleCount()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return process.HandleCount;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long ReadLong(Func<Process, long> reader)
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return reader(process);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 }

@@ -7,4 +7,6 @@ public interface IAuthService
 {
     ApiResponse<string> Register(RegisterDto dto);
     ApiResponse<string> Login(LoginDto dto);
+    AuthUserDto RegisterInternal(RegisterDto dto);
+    AuthUserDto? GetByEmail(string email);
 }

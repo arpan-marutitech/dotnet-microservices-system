@@ -33,4 +33,29 @@ public class AuthController : ControllerBase
 
         return Ok(_authService.Login(dto));
     }
+
+    [HttpGet("internal/by-email")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult<ApiResponse<AuthUserDto>> GetByEmail([FromQuery] string email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return BadRequest(ApiResponse<AuthUserDto>.FailResponse("Email is required"));
+
+        var user = _authService.GetByEmail(email);
+        if (user == null)
+            return NotFound(ApiResponse<AuthUserDto>.FailResponse("User not found"));
+
+        return Ok(ApiResponse<AuthUserDto>.SuccessResponse(user, "User fetched successfully"));
+    }
+
+    [HttpPost("internal/register")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult<ApiResponse<AuthUserDto>> RegisterInternal([FromBody] RegisterDto dto)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ApiResponse<AuthUserDto>.FailResponse("Invalid input"));
+
+        var user = _authService.RegisterInternal(dto);
+        return Ok(ApiResponse<AuthUserDto>.SuccessResponse(user, "User registered successfully"));
+    }
 }

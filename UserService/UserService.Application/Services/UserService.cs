@@ -1,5 +1,6 @@
 using AutoMapper;
 using BCrypt.Net;
+using UserService.Application.Clients;
 using UserService.Application.Common;
 using UserService.Application.DTOs;
 using UserService.Application.Services.Interfaces;
@@ -13,12 +14,18 @@ public class UserService : IUserService
     private readonly IUserRepository _repository;
     private readonly IMapper _mapper;
     private readonly RedisService _redis;
+    private readonly AuthServiceClient _authServiceClient;
 
-    public UserService(IUserRepository repository, IMapper mapper, RedisService redis)
+    public UserService(
+        IUserRepository repository,
+        IMapper mapper,
+        RedisService redis,
+        AuthServiceClient authServiceClient)
     {
         _repository = repository;
         _mapper = mapper;
         _redis = redis;
+        _authServiceClient = authServiceClient;
     }
 
     public ApiResponse<List<UserDto>> GetAll()
@@ -48,21 +55,69 @@ public class UserService : IUserService
         return ApiResponse<UserDto>.SuccessResponse(result, "User fetched successfully");
     }
 
-    public ApiResponse<UserDto> Create(CreateUserDto dto)
+    public async Task<ApiResponse<UserDto>> Create(CreateUserDto dto)
     {
-        var existing = _repository.GetByEmail(dto.Email.Trim().ToLower());
-        if (existing != null)
-            return ApiResponse<UserDto>.FailResponse("User already exists");
+        var email = dto.Email.Trim().ToLower();
+        var authUser = await _authServiceClient.GetByEmailAsync(email)
+            ?? await _authServiceClient.RegisterInternalAsync(dto);
 
-        var user = _mapper.Map<User>(dto);
-        user.Email = dto.Email.Trim().ToLower();
-        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+        return await CreateOrSyncUserAsync(new SyncUserDto
+        {
+            AuthUserId = authUser.Id,
+            Name = dto.Name,
+            Email = email,
+            Password = dto.Password,
+            Role = string.IsNullOrWhiteSpace(dto.Role) ? authUser.Role : dto.Role
+        }, "User created successfully");
+    }
 
-        var created = _repository.Add(user);
+    public Task<ApiResponse<UserDto>> SyncAuthUser(SyncUserDto dto)
+    {
+        return CreateOrSyncUserAsync(dto, "User synced successfully");
+    }
 
-        _redis.RemoveAsync($"user:{created.Id}").GetAwaiter().GetResult();
+    private async Task<ApiResponse<UserDto>> CreateOrSyncUserAsync(SyncUserDto dto, string successMessage)
+    {
+        var email = dto.Email.Trim().ToLower();
+        var existingById = _repository.GetById(dto.AuthUserId);
+        if (existingById != null)
+        {
+            existingById.Name = dto.Name;
+            existingById.Email = email;
+            existingById.Role = string.IsNullOrWhiteSpace(dto.Role) ? existingById.Role : dto.Role;
 
-        return ApiResponse<UserDto>.SuccessResponse(_mapper.Map<UserDto>(created), "User created successfully");
+            if (!string.IsNullOrWhiteSpace(dto.Password))
+            {
+                existingById.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+            }
+
+            _repository.Update(existingById);
+            await _redis.RemoveAsync($"user:{existingById.Id}");
+
+            return ApiResponse<UserDto>.SuccessResponse(_mapper.Map<UserDto>(existingById), successMessage);
+        }
+
+        var existingByEmail = _repository.GetByEmail(email);
+        if (existingByEmail != null && existingByEmail.Id != dto.AuthUserId)
+        {
+            _repository.Delete(existingByEmail.Id);
+            await _redis.RemoveAsync($"user:{existingByEmail.Id}");
+        }
+
+        var user = new User
+        {
+            Id = dto.AuthUserId,
+            Name = dto.Name,
+            Email = email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+            Role = string.IsNullOrWhiteSpace(dto.Role) ? "User" : dto.Role
+        };
+
+        var created = _repository.Add(user, preserveIdentity: true);
+
+        await _redis.RemoveAsync($"user:{created.Id}");
+
+        return ApiResponse<UserDto>.SuccessResponse(_mapper.Map<UserDto>(created), successMessage);
     }
 
     public ApiResponse<UserDto> Update(int id, UpdateUserDto dto)

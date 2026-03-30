@@ -1,4 +1,4 @@
-namespace OrderService.Application.Messaging;
+namespace Contracts;
 
 public class OrderCreatedEvent
 {
